@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pio device list:*)",
+      "Bash(pio run:*)",
+      "Bash(mode)",
+      "Bash(powershell:*)",
+      "Bash(wmic path Win32_SerialPort get:*)",
+      "Bash(reg query:*)",
+      "Bash(python -m serial.tools.list_ports:*)",
+      "Bash(pio device monitor:*)",
+      "Bash(git init:*)",
+      "Bash(git remote add:*)",
+      "Bash(git branch:*)",
+      "Bash(git add:*)"
+    ]
+  }
+}
