@@ -69,3 +69,13 @@ pio device monitor --baud 115200 --port COM9
 -DEPD_PIN_RST=38
 -DEPD_PIN_BUSY=39
 ```
+
+
+
+На другом компе достаточно:
+
+e-ink.git
+открыть проект в PlatformIO
+проверить upload_port/monitor_port
+pio run -t upload
+И можно сразу пользоваться.
