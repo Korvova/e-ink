@@ -1,55 +1,71 @@
-# E-Ink Display Project
+# E-Ink Display Project (Waveshare ESP32-S3-ETH + GoodDisplay 10.85")
 
-Проект для управления двумя e-ink дисплеями с помощью ESP32-S3-ETH
+Рабочий проект для `GDEM1085T51` через драйверы GoodDisplay (`Display_EPD_W21*`) и PlatformIO.
 
-## Оборудование
+## Важно
 
-- **ESP32-S3-ETH**
-- **2x Goodisplay DESPI-C1085** (драйверы e-ink)
-- **Дисплей FPC-8617B**
+- Для этого дисплея нужны обе линии выбора кристаллов: `CS` и `CS2`.
+- Сейчас в `platformio.ini` активна распиновка **экрана 2** (через `build_flags`).
+- Данные (`SDI`) и такт (`SCLK`) можно шарить между экранами.
 
-## Схема подключения
+## Распиновка
 
-### Дисплей 1 (DESPI-C1085 #1)
+### Экран 1
 
-| DESPI-C1085 | ESP32-S3-ETH |
-|-------------|--------------|
-| SDI         | IO35         |
-| SCLK        | IO36         |
-| CS          | IO37         |
-| RES         | IO38         |
-| BUSY        | IO39         |
-| 3.3V        | 3V3          |
-| GND         | GND          |
+| GoodDisplay | ESP32-S3-ETH |
+|---|---|
+| SDI | IO35 |
+| SCLK | IO36 |
+| CS | IO37 |
+| CS2 | IO40 |
+| RES | IO38 |
+| BUSY | IO39 |
+| 3.3V | 3V3 |
+| GND | GND |
 
-### Дисплей 2 (DESPI-C1085 #2)
+### Экран 2
 
-| DESPI-C1085 | ESP32-S3-ETH |
-|-------------|--------------|
-| SDI         | IO35 (shared)|
-| SCLK        | IO36 (shared)|
-| CS          | IO40         |
-| RES         | IO41         |
-| BUSY        | IO42         |
-| 3.3V        | 3V3          |
-| GND         | GND          |
+| GoodDisplay | ESP32-S3-ETH |
+|---|---|
+| SDI | IO35 (shared) |
+| SCLK | IO36 (shared) |
+| CS | IO41 |
+| CS2 | IO42 |
+| RES | IO45 |
+| BUSY | IO1 |
+| 3.3V | 3V3 (shared) |
+| GND | GND (shared) |
+
+## Команды в Serial (`115200`)
+
+- `1` - white
+- `2` - black
+- `3` - test pattern
+- `4` - `PRIVET RMS EKRAN 2` (для текущей версии)
+- `r` - reset pulse
+- `b` - busy state
 
 ## Сборка и загрузка
 
-1. Установите [PlatformIO](https://platformio.org/)
-2. Подключите ESP32-S3 через USB Type-C
-3. Войдите в boot mode: зажмите BOOT, нажмите RESET, отпустите BOOT
-4. Загрузите прошивку:
 ```bash
-pio run --target upload
+pio run -t upload
 ```
 
-## COM порт
+Monitor:
 
-Текущий COM порт: **COM9**
+```bash
+pio device monitor --baud 115200 --port COM9
+```
 
-Для изменения отредактируйте `platformio.ini`:
+## Как переключить проект на экран 1
+
+В `platformio.ini` поменяйте `build_flags` на:
+
 ```ini
-upload_port = COM9
-monitor_port = COM9
+-DEPD_PIN_MOSI=35
+-DEPD_PIN_CLK=36
+-DEPD_PIN_CS=37
+-DEPD_PIN_CS2=40
+-DEPD_PIN_RST=38
+-DEPD_PIN_BUSY=39
 ```
