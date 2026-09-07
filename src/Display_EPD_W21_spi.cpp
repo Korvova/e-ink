@@ -1,4 +1,11 @@
 #include "Display_EPD_W21_spi.h"
+
+int EPD_W21_BUSY = EPD_PIN_BUSY;
+int EPD_W21_RST  = EPD_PIN_RST;
+int EPD_W21_CS2  = EPD_PIN_CS2;
+int EPD_W21_CS   = EPD_PIN_CS;
+int EPD_W21_CLK  = EPD_PIN_CLK;
+int EPD_W21_MOSI = EPD_PIN_MOSI;
 #include <SPI.h>
 
 //SPI write byte

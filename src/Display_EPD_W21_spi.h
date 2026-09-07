@@ -23,12 +23,13 @@
 #define EPD_PIN_MOSI 35
 #endif
 
-#define EPD_W21_BUSY EPD_PIN_BUSY
-#define EPD_W21_RST EPD_PIN_RST
-#define EPD_W21_CS2 EPD_PIN_CS2
-#define EPD_W21_CS EPD_PIN_CS
-#define EPD_W21_CLK EPD_PIN_CLK
-#define EPD_W21_MOSI EPD_PIN_MOSI
+// Runtime-switchable pins (defaults come from EPD_PIN_* above)
+extern int EPD_W21_BUSY;
+extern int EPD_W21_RST;
+extern int EPD_W21_CS2;
+extern int EPD_W21_CS;
+extern int EPD_W21_CLK;
+extern int EPD_W21_MOSI;
 
 //IO settings
 #define isEPD_W21_BUSY digitalRead(EPD_W21_BUSY)  //BUSY

@@ -7,6 +7,19 @@ static const int DISP_H = 480;
 static const int BYTES_PER_LINE = DISP_W / 8; // 170
 static uint8_t frameBuf[DISP_H * BYTES_PER_LINE];
 
+// Pin sets from README: screen 1 / screen 2 (SDI+SCLK shared)
+static const int PINSET[2][6] = { // CS, CS2, RST, BUSY, CLK, MOSI
+  {37, 40, 38, 39, 36, 35},
+  {41, 42, 45, 1, 36, 35},
+};
+static int curPinSet = -1;
+
+static void applyPinSet(int n) {
+  curPinSet = n;
+  EPD_W21_CS = PINSET[n][0]; EPD_W21_CS2 = PINSET[n][1]; EPD_W21_RST = PINSET[n][2];
+  EPD_W21_BUSY = PINSET[n][3]; EPD_W21_CLK = PINSET[n][4]; EPD_W21_MOSI = PINSET[n][5];
+}
+
 static void initEpdPins() {
   pinMode(EPD_W21_CS, OUTPUT);
   pinMode(EPD_W21_CS2, OUTPUT);
@@ -110,14 +123,18 @@ void setup() {
   Serial.printf("Pins: CS=%d CS2=%d RST=%d BUSY=%d CLK=%d MOSI=%d\n",
                 EPD_W21_CS, EPD_W21_CS2, EPD_W21_RST, EPD_W21_BUSY, EPD_W21_CLK, EPD_W21_MOSI);
 
+  applyPinSet(EPD_PIN_CS == 37 ? 0 : 1);
   initEpdPins();
   EPD_SetMono(true);
+  Serial.printf("Pin set: screen %d\n", curPinSet + 1);
 
   Serial.println("Commands:");
   Serial.println(" 1 - white");
   Serial.println(" 2 - black");
   Serial.println(" 3 - test pattern");
   Serial.println(" 4 - PRIVET RMS EKRAN 2");
+  Serial.println(" 5 - TEST");
+  Serial.println(" p - toggle pin set (screen 1 / screen 2)");
   Serial.println(" r - reset pulse");
   Serial.println(" b - busy state");
 }
@@ -153,6 +170,18 @@ void loop() {
     EPD_Init();
     EPD_WhiteScreen_ALL(frameBuf);
     EPD_DeepSleep();
+  } else if (c == '5') {
+    Serial.println("[cmd] TEST");
+    clearFrame();
+    drawTextCentered("TEST", 12);
+    EPD_Init();
+    EPD_WhiteScreen_ALL(frameBuf);
+    EPD_DeepSleep();
+  } else if (c == 'p') {
+    applyPinSet(curPinSet == 0 ? 1 : 0);
+    initEpdPins();
+    Serial.printf("[cmd] pin set -> screen %d: CS=%d CS2=%d RST=%d BUSY=%d CLK=%d MOSI=%d\n",
+                  curPinSet + 1, EPD_W21_CS, EPD_W21_CS2, EPD_W21_RST, EPD_W21_BUSY, EPD_W21_CLK, EPD_W21_MOSI);
   } else if (c == 'r') {
     Serial.println("[cmd] RESET pulse");
     EPD_W21_RST_0;
