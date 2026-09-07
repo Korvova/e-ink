@@ -90,6 +90,8 @@ static void setupFonts() {
   for (OpenFontRender* r : { &ofrRegular, &ofrBold }) {
     r->setDrawPixel(ofrDrawPixel);
     r->setDrawFastHLine(ofrDrawHLine);
+    // draw2screen() uses these, not the fg/bg arguments of drawString(): black on white
+    r->setFontColor((uint16_t)0x0000, (uint16_t)0xFFFF);
     r->setBackgroundFillMethod(BgFillMethod::None);
     r->setLineSpaceRatio(1.15);
   }
@@ -342,7 +344,39 @@ static void handleClear() {
   server.send(ok ? 202 : 503, "application/json; charset=utf-8", statusJson());
 }
 
+// Last rendered frame as a 1-bit BMP (what was actually sent to the panel)
+static void handleFrameBmp() {
+  const int stride = ((BYTES_PER_LINE + 3) / 4) * 4; // 172
+  const uint32_t dataSize = (uint32_t)stride * DISP_H;
+  const uint32_t fileSize = 62 + dataSize;
+  uint8_t hdr[62] = {0};
+  hdr[0] = 'B'; hdr[1] = 'M';
+  hdr[2] = fileSize; hdr[3] = fileSize >> 8; hdr[4] = fileSize >> 16; hdr[5] = fileSize >> 24;
+  hdr[10] = 62;                       // pixel data offset
+  hdr[14] = 40;                       // BITMAPINFOHEADER
+  hdr[18] = DISP_W & 0xFF; hdr[19] = DISP_W >> 8;
+  int32_t h = -DISP_H;                // negative = top-down rows
+  hdr[22] = h & 0xFF; hdr[23] = (h >> 8) & 0xFF; hdr[24] = (h >> 16) & 0xFF; hdr[25] = (h >> 24) & 0xFF;
+  hdr[26] = 1;                        // planes
+  hdr[28] = 1;                        // bits per pixel
+  hdr[34] = dataSize; hdr[35] = dataSize >> 8; hdr[36] = dataSize >> 16; hdr[37] = dataSize >> 24;
+  hdr[46] = 2;                        // colors used
+  // palette: index 0 = white, index 1 = black
+  hdr[54] = 0xFF; hdr[55] = 0xFF; hdr[56] = 0xFF; hdr[57] = 0;
+  hdr[58] = 0;    hdr[59] = 0;    hdr[60] = 0;    hdr[61] = 0;
+  server.setContentLength(fileSize);
+  server.send(200, "image/bmp", "");
+  server.sendContent((const char*)hdr, sizeof(hdr));
+  static uint8_t row[172];
+  for (int y = 0; y < DISP_H; y++) {
+    memcpy(row, &frameBuf[y * BYTES_PER_LINE], BYTES_PER_LINE);
+    row[170] = 0; row[171] = 0;
+    server.sendContent((const char*)row, stride);
+  }
+}
+
 static void setupWeb() {
+  server.on("/frame.bmp", HTTP_GET, handleFrameBmp);
   server.on("/", HTTP_GET, handleRoot);
   server.on("/status", HTTP_GET, handleStatus);
   server.on("/show", HTTP_POST, handleShow);
