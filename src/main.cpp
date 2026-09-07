@@ -461,7 +461,7 @@ void setup() {
   }
 
   pinMode(LED_PIN, OUTPUT);
-  setLed(prefs.getBool("led", false));
+  setLed(true);   // always ON after boot (bench check for the lamp wiring); web button can still switch it
 
   setupFonts();
 
