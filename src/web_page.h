@@ -21,8 +21,10 @@ static const char WEB_PAGE[] PROGMEM = R"HTML(<!doctype html>
  .preview{margin-top:10px;background:#fff;border:1px solid #bbb;aspect-ratio:1360/480;display:flex;align-items:center;justify-content:center;text-align:center;white-space:pre-wrap;overflow:hidden;font-family:"PT Sans",Arial,sans-serif;line-height:1.15;padding:2%;box-sizing:border-box}
  .status{font-size:13px;color:#666;min-height:18px;margin-top:6px}
  .busy{color:#b35c00}
+ #led{background:#555;padding:8px 14px;font-size:14px;margin-left:16px}
+ #led.on{background:#e0a800;color:#222}
 </style></head><body>
-<header><span>E-ink табло</span><small id="net"></small></header>
+<header><span>E-ink табло <button id="led" title="GPIO47">💡 Лампа: …</button></span><small id="net"></small></header>
 <main>
  <section class="card" data-screen="1">
   <h2>Экран 1</h2>
@@ -61,8 +63,11 @@ cards.forEach(c=>{const u=ui(c);['input','change'].forEach(e=>{u.ta.addEventList
 async function send(path,c){const u=ui(c);const p=new URLSearchParams({screen:u.n,text:u.ta.value,size:u.size.value,bold:u.bold.checked?1:0});
  u.st.textContent='Отправляю…';try{const r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:p});
  u.st.textContent=r.status==202?'Принято, экран обновляется ~20 с':'Ошибка '+r.status}catch(e){u.st.textContent='Нет связи с платой'}}
+const ledBtn=document.getElementById('led');
+function showLed(on){ledBtn.textContent='💡 Лампа: '+(on?'ВКЛ':'выкл');ledBtn.classList.toggle('on',on)}
+ledBtn.onclick=async()=>{try{const s=await(await fetch('/led?state=toggle',{method:'POST'})).json();showLed(s.led)}catch(e){}};
 async function poll(){try{const s=await(await fetch('/status')).json();
- document.getElementById('net').textContent=(s.ip?'IP '+s.ip+' · ':'')+s.board;
+ document.getElementById('net').textContent=(s.ip?'IP '+s.ip+' · ':'')+s.board;showLed(s.led);
  cards.forEach((c,i)=>{const u=ui(c);const b=s.busy&&s.busyScreen==i+1;u.btns.forEach(x=>x.disabled=s.busy);
   if(b){u.st.textContent='Обновляется…';u.st.classList.add('busy')}else{u.st.classList.remove('busy');if(u.st.textContent=='Обновляется…')u.st.textContent='Готово'}
   if(!u.ta.dataset.init){u.ta.value=s.screens[i].text;u.size.value=s.screens[i].size;u.bold.checked=s.screens[i].bold;u.ta.dataset.init=1;preview(c)}})}catch(e){}

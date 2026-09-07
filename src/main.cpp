@@ -282,6 +282,17 @@ static void setupEthernet() {
   Serial.printf("[eth] begin on %s -> %s\n", ethPins->name, ethStarted ? "ok" : "FAILED");
 }
 
+// ---------------------------------------------------------------- LED on GPIO47
+static const int LED_PIN = 47;
+static bool ledOn = false;
+
+static void setLed(bool on) {
+  ledOn = on;
+  digitalWrite(LED_PIN, on ? HIGH : LOW);
+  prefs.putBool("led", on);
+  Serial.printf("[led] %s\n", on ? "ON" : "OFF");
+}
+
 // ---------------------------------------------------------------- web
 static WebServer server(80);
 
@@ -308,6 +319,7 @@ static String statusJson() {
   j += ",\"queued\":" + String((int)uxQueueMessagesWaiting(jobQueue));
   j += ",\"ip\":\"" + (ethStarted ? ETH.localIP().toString() : String("")) + "\"";
   j += ",\"board\":\"" + String(ethPins ? ethPins->name : "no ethernet") + "\"";
+  j += ",\"led\":" + String(ledOn ? "true" : "false");
   j += ",\"screens\":[";
   for (int i = 0; i < 2; i++) {
     if (i) j += ",";
@@ -375,8 +387,20 @@ static void handleFrameBmp() {
   }
 }
 
+// /led?state=on|off|1|0|toggle  (no state -> toggle)
+static void handleLed() {
+  String st = server.arg("state");
+  st.toLowerCase();
+  if (st == "on" || st == "1" || st == "true") setLed(true);
+  else if (st == "off" || st == "0" || st == "false") setLed(false);
+  else setLed(!ledOn);
+  server.send(200, "application/json; charset=utf-8", statusJson());
+}
+
 static void setupWeb() {
   server.on("/frame.bmp", HTTP_GET, handleFrameBmp);
+  server.on("/led", HTTP_GET, handleLed);
+  server.on("/led", HTTP_POST, handleLed);
   server.on("/", HTTP_GET, handleRoot);
   server.on("/status", HTTP_GET, handleStatus);
   server.on("/show", HTTP_POST, handleShow);
@@ -393,7 +417,7 @@ static void printHelp() {
   Serial.println("Commands (serial):");
   Serial.println(" 1 - white (current screen)   2 - black   3 - test pattern");
   Serial.println(" t<text>  - render text with TTF on current screen (UTF-8, \\n = new line)");
-  Serial.println(" p - toggle current screen (1/2)    i - network info    h - help");
+  Serial.println(" p - toggle current screen (1/2)    l - LED on/off (GPIO47)    i - network info    h - help");
 }
 
 static void handleSerial() {
@@ -412,6 +436,8 @@ static void handleSerial() {
   } else if (c == 'p') {
     curPinSet = curPinSet == 0 ? 1 : 0;
     Serial.printf("[cmd] current screen -> %d\n", curPinSet + 1);
+  } else if (c == 'l') {
+    setLed(!ledOn);
   } else if (c == 'i') {
     Serial.println(statusJson());
   } else if (c == 'h' || c == '?') printHelp();
@@ -433,6 +459,9 @@ void setup() {
     lastSize[i] = prefs.getInt(i == 0 ? "s0" : "s1", 0);
     lastBold[i] = prefs.getBool(i == 0 ? "b0" : "b1", false);
   }
+
+  pinMode(LED_PIN, OUTPUT);
+  setLed(prefs.getBool("led", false));
 
   setupFonts();
 
