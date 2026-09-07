@@ -134,6 +134,7 @@ void setup() {
   Serial.println(" 3 - test pattern");
   Serial.println(" 4 - PRIVET RMS EKRAN 2");
   Serial.println(" 5 - TEST");
+  Serial.println(" t<text> - draw text (A E I K M N P R S T V 1 2)");
   Serial.println(" p - toggle pin set (screen 1 / screen 2)");
   Serial.println(" r - reset pulse");
   Serial.println(" b - busy state");
@@ -174,6 +175,19 @@ void loop() {
     Serial.println("[cmd] TEST");
     clearFrame();
     drawTextCentered("TEST", 12);
+    EPD_Init();
+    EPD_WhiteScreen_ALL(frameBuf);
+    EPD_DeepSleep();
+  } else if (c == 't') {
+    // t<text>\n  - draw arbitrary text (supported glyphs: A E I K M N P R S T V 1 2, space)
+    String text = Serial.readStringUntil('\n');
+    text.trim();
+    if (text.length() == 0) text = "TEST";
+    Serial.printf("[cmd] TEXT: %s\n", text.c_str());
+    clearFrame();
+    int scale = 12;
+    while (scale > 2 && (int)text.length() * 9 * scale > DISP_W) scale--;
+    drawTextCentered(text.c_str(), scale);
     EPD_Init();
     EPD_WhiteScreen_ALL(frameBuf);
     EPD_DeepSleep();
