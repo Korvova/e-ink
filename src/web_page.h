@@ -26,7 +26,12 @@ static const char WEB_PAGE[] PROGMEM = R"HTML(<!doctype html>
 </style></head><body>
 <header><span>E-ink табло <button id="led" title="GPIO47">💡 Лампа: …</button>
  <input type="color" id="ledc" value="#ffffff" title="цвет" style="vertical-align:middle;height:30px;width:40px;border:0;background:none">
- <input type="range" id="ledb" min="1" max="255" value="128" title="яркость" style="vertical-align:middle;width:110px"></span><small id="net"></small></header>
+ <input type="range" id="ledb" min="1" max="255" value="128" title="яркость" style="vertical-align:middle;width:110px">
+ <select id="ledfx" title="эффект" style="vertical-align:middle;padding:5px;border-radius:6px;border:0">
+  <option value="solid">Сплошной</option><option value="wave">Волна</option><option value="load">Загрузка</option>
+  <option value="converge">Схождение в точку</option><option value="comet">Комета</option><option value="breathe">Дыхание</option><option value="rainbow">Радуга</option>
+ </select>
+ <input type="range" id="ledsp" min="1" max="10" value="5" title="скорость" style="vertical-align:middle;width:80px"></span><small id="net"></small></header>
 <main>
  <section class="card" data-screen="1">
   <h2>Экран 1</h2>
@@ -71,9 +76,12 @@ ledBtn.onclick=async()=>{try{const s=await(await fetch('/led?state=toggle',{meth
 const ledC=document.getElementById('ledc'),ledB=document.getElementById('ledb');let ledInit=false;
 async function sendLedColor(){try{await fetch('/led?color='+ledC.value.slice(1)+'&bright='+ledB.value,{method:'POST'})}catch(e){}}
 ledC.addEventListener('change',sendLedColor);ledB.addEventListener('change',sendLedColor);
+const ledFx=document.getElementById('ledfx'),ledSp=document.getElementById('ledsp');
+async function sendLedFx(){try{await fetch('/led?state=on&effect='+ledFx.value+'&speed='+ledSp.value,{method:'POST'})}catch(e){}}
+ledFx.addEventListener('change',sendLedFx);ledSp.addEventListener('change',sendLedFx);
 async function poll(){try{const s=await(await fetch('/status')).json();
  document.getElementById('net').textContent=(s.ip?'IP '+s.ip+' · ':'')+s.board;showLed(s.led);
- if(!ledInit){ledC.value='#'+s.ledColor.toLowerCase();ledB.value=s.ledBright;ledInit=true}
+ if(!ledInit){ledC.value='#'+s.ledColor.toLowerCase();ledB.value=s.ledBright;ledFx.value=s.ledEffect;ledSp.value=s.ledSpeed;ledInit=true}
  cards.forEach((c,i)=>{const u=ui(c);const b=s.busy&&s.busyScreen==i+1;u.btns.forEach(x=>x.disabled=s.busy);
   if(b){u.st.textContent='Обновляется…';u.st.classList.add('busy')}else{u.st.classList.remove('busy');if(u.st.textContent=='Обновляется…')u.st.textContent='Готово'}
   if(!u.ta.dataset.init){u.ta.value=s.screens[i].text;u.size.value=s.screens[i].size;u.bold.checked=s.screens[i].bold;u.ta.dataset.init=1;preview(c)}})}catch(e){}

@@ -286,15 +286,102 @@ static void setupEthernet() {
 // ---------------------------------------------------------------- addressable COB RGB strip on GPIO47
 // FOB/COB addressable RGB, 5 V, WS2812-compatible (800 kHz, GRB). GPIO47 = DATA.
 static const int LED_PIN = 47;
-static const int LED_COUNT = 120;          // more than the 10 cm strip has; extra data is ignored
-static Adafruit_NeoPixel strip(LED_COUNT, LED_PIN, NEO_GRB + NEO_KHZ800);
+static const int LED_MAX = 300;
+static Adafruit_NeoPixel strip(LED_MAX, LED_PIN, NEO_GRB + NEO_KHZ800);
 static bool ledOn = false;
 static uint32_t ledColor = 0xFFFFFF;       // RRGGBB
 static uint8_t ledBright = 128;            // 0..255
+static int ledCount = 120;                 // pixels actually used by effects
+enum LedEffect : uint8_t { FX_SOLID = 0, FX_WAVE, FX_LOAD, FX_CONVERGE, FX_RAINBOW, FX_BREATHE, FX_COMET, FX_COUNT };
+static const char* FX_NAMES[FX_COUNT] = { "solid", "wave", "load", "converge", "rainbow", "breathe", "comet" };
+static LedEffect ledEffect = FX_SOLID;
+static uint8_t ledSpeed = 5;               // 1..10
+
+static inline uint32_t scaleColor(uint32_t c, uint8_t v) {  // v: 0..255
+  uint8_t r = ((c >> 16) & 0xFF) * v / 255, g = ((c >> 8) & 0xFF) * v / 255, b = (c & 0xFF) * v / 255;
+  return ((uint32_t)r << 16) | ((uint32_t)g << 8) | b;
+}
+
+static void ledRenderSolid() { strip.fill(ledColor, 0, ledCount); }
+
+// One animation frame
+static void ledRenderEffect(uint32_t now) {
+  float sp = ledSpeed / 5.0f;                          // 1.0 at speed 5
+  float t = now * 0.001f * sp;
+  int n = ledCount;
+  strip.clear();
+  switch (ledEffect) {
+    case FX_WAVE: {                                    // running sine wave of brightness
+      for (int i = 0; i < n; i++) {
+        float v = 0.5f + 0.5f * sinf(i * (2 * PI / 20.0f) - t * 6.0f);
+        strip.setPixelColor(i, scaleColor(ledColor, (uint8_t)(20 + 235 * v)));
+      }
+      break;
+    }
+    case FX_LOAD: {                                    // progress bar fills, holds, fades out
+      float cycle = 3.0f, ph = fmodf(t, cycle) / cycle;   // 0..1
+      int lit = ph < 0.8f ? (int)(n * ph / 0.8f) : n;
+      uint8_t v = ph < 0.8f ? 255 : (uint8_t)(255 * (1.0f - (ph - 0.8f) / 0.2f));
+      for (int i = 0; i < lit; i++) strip.setPixelColor(i, scaleColor(ledColor, v));
+      break;
+    }
+    case FX_CONVERGE: {                                // two segments run from both ends to the centre, flash, restart
+      float cycle = 2.5f, ph = fmodf(t, cycle) / cycle;
+      int half = n / 2, len = max(2, n / 12);
+      if (ph < 0.75f) {
+        int pos = (int)(half * ph / 0.75f);
+        for (int k = 0; k < len; k++) {
+          uint8_t v = (uint8_t)(255 - k * (200 / len));
+          int ia = pos - k, ib = n - 1 - pos + k;
+          if (ia >= 0) strip.setPixelColor(ia, scaleColor(ledColor, v));
+          if (ib < n) strip.setPixelColor(ib, scaleColor(ledColor, v));
+        }
+      } else {                                         // flash expanding from centre and fading
+        float f = (ph - 0.75f) / 0.25f;
+        int rad = (int)(half * f);
+        uint8_t v = (uint8_t)(255 * (1.0f - f));
+        for (int i = half - rad; i <= half + rad; i++) if (i >= 0 && i < n) strip.setPixelColor(i, scaleColor(ledColor, v));
+      }
+      break;
+    }
+    case FX_RAINBOW: {
+      uint16_t base = (uint16_t)(fmodf(t * 8000.0f, 65536.0f));
+      for (int i = 0; i < n; i++) strip.setPixelColor(i, strip.ColorHSV(base + (uint16_t)(i * 65536L / n)));
+      break;
+    }
+    case FX_BREATHE: {
+      float v = 0.5f + 0.5f * sinf(t * 2.0f);
+      strip.fill(scaleColor(ledColor, (uint8_t)(10 + 245 * v)), 0, n);
+      break;
+    }
+    case FX_COMET: {                                   // knight rider with tail
+      float cycle = 2.0f, ph = fmodf(t, cycle) / cycle;
+      float pos = ph < 0.5f ? (n - 1) * ph * 2 : (n - 1) * (1 - (ph - 0.5f) * 2);
+      int tail = max(3, n / 8);
+      for (int k = 0; k < tail; k++) {
+        int i = (int)pos + (ph < 0.5f ? -k : k);
+        if (i >= 0 && i < n) strip.setPixelColor(i, scaleColor(ledColor, (uint8_t)(255 - k * (230 / tail))));
+      }
+      break;
+    }
+    default: ledRenderSolid(); break;
+  }
+}
 
 static void applyLed() {
   strip.setBrightness(ledOn ? ledBright : 0);
-  strip.fill(ledOn ? ledColor : 0);
+  strip.clear();
+  if (ledOn) { if (ledEffect == FX_SOLID) ledRenderSolid(); else ledRenderEffect(millis()); }
+  strip.show();
+}
+
+static void ledTick() {
+  static uint32_t last = 0;
+  if (!ledOn || ledEffect == FX_SOLID) return;
+  uint32_t now = millis();
+  if (now - last < 25) return;
+  last = now;
+  ledRenderEffect(now);
   strip.show();
 }
 
@@ -302,7 +389,8 @@ static void setLed(bool on) {
   ledOn = on;
   prefs.putBool("led", on);
   applyLed();
-  Serial.printf("[led] %s color=%06lX bright=%u\n", on ? "ON" : "OFF", (unsigned long)ledColor, ledBright);
+  Serial.printf("[led] %s color=%06lX bright=%u effect=%s speed=%u count=%d\n", on ? "ON" : "OFF",
+                (unsigned long)ledColor, ledBright, FX_NAMES[ledEffect], ledSpeed, ledCount);
 }
 
 static void setLedColor(uint32_t rgb, int bright) {
@@ -310,6 +398,16 @@ static void setLedColor(uint32_t rgb, int bright) {
   if (bright >= 0) ledBright = (uint8_t)constrain(bright, 0, 255);
   prefs.putUInt("ledc", ledColor);
   prefs.putUChar("ledb", ledBright);
+  applyLed();
+}
+
+static void setLedEffect(const String& name, int speed, int count) {
+  for (int i = 0; i < FX_COUNT; i++) if (name == FX_NAMES[i]) ledEffect = (LedEffect)i;
+  if (speed > 0) ledSpeed = (uint8_t)constrain(speed, 1, 10);
+  if (count > 0) ledCount = constrain(count, 1, LED_MAX);
+  prefs.putUChar("ledfx", ledEffect);
+  prefs.putUChar("ledsp", ledSpeed);
+  prefs.putInt("ledn", ledCount);
   applyLed();
 }
 
@@ -342,6 +440,7 @@ static String statusJson() {
   j += ",\"led\":" + String(ledOn ? "true" : "false");
   char cbuf[8]; snprintf(cbuf, sizeof(cbuf), "%06lX", (unsigned long)ledColor);
   j += ",\"ledColor\":\"" + String(cbuf) + "\",\"ledBright\":" + String(ledBright);
+  j += ",\"ledEffect\":\"" + String(FX_NAMES[ledEffect]) + "\",\"ledSpeed\":" + String(ledSpeed) + ",\"ledCount\":" + String(ledCount);
   j += ",\"screens\":[";
   for (int i = 0; i < 2; i++) {
     if (i) j += ",";
@@ -419,6 +518,11 @@ static void handleLed() {
     setLedColor(rgb, b);
     changed = true;
   }
+  if (server.hasArg("effect") || server.hasArg("speed") || server.hasArg("count")) {
+    setLedEffect(server.arg("effect"), server.hasArg("speed") ? server.arg("speed").toInt() : 0,
+                 server.hasArg("count") ? server.arg("count").toInt() : 0);
+    changed = true;
+  }
   String st = server.arg("state");
   st.toLowerCase();
   if (st == "on" || st == "1" || st == "true") setLed(true);
@@ -493,12 +597,15 @@ void setup() {
   strip.begin();
   ledColor = prefs.getUInt("ledc", 0xFFFFFF);
   ledBright = prefs.getUChar("ledb", 128);
+  ledEffect = (LedEffect)min((int)prefs.getUChar("ledfx", FX_SOLID), (int)FX_COUNT - 1);
+  ledSpeed = prefs.getUChar("ledsp", 5);
+  ledCount = constrain(prefs.getInt("ledn", 120), 1, LED_MAX);
   setLed(true);   // always ON after boot (bench check); web button can still switch it
 
   setupFonts();
 
   jobQueue = xQueueCreate(4, sizeof(Job));
-  xTaskCreatePinnedToCore(displayTask, "epd", 12288, nullptr, 1, nullptr, 1);
+  xTaskCreatePinnedToCore(displayTask, "epd", 12288, nullptr, 1, nullptr, 0);
 
   setupEthernet();
   setupWeb();
@@ -517,5 +624,6 @@ void loop() {
   server.handleClient();
   handleSerial();
   ethFallbackTick();
+  ledTick();
   delay(2);
 }
