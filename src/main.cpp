@@ -7,6 +7,7 @@
 #include <ESPmDNS.h>
 #include <Preferences.h>
 #include "OpenFontRender.h"
+#include <Adafruit_NeoPixel.h>
 #include "Display_EPD_W21_spi.h"
 #include "Display_EPD_W21.h"
 #include "web_page.h"
@@ -282,15 +283,34 @@ static void setupEthernet() {
   Serial.printf("[eth] begin on %s -> %s\n", ethPins->name, ethStarted ? "ok" : "FAILED");
 }
 
-// ---------------------------------------------------------------- LED on GPIO47
+// ---------------------------------------------------------------- addressable COB RGB strip on GPIO47
+// FOB/COB addressable RGB, 5 V, WS2812-compatible (800 kHz, GRB). GPIO47 = DATA.
 static const int LED_PIN = 47;
+static const int LED_COUNT = 120;          // more than the 10 cm strip has; extra data is ignored
+static Adafruit_NeoPixel strip(LED_COUNT, LED_PIN, NEO_GRB + NEO_KHZ800);
 static bool ledOn = false;
+static uint32_t ledColor = 0xFFFFFF;       // RRGGBB
+static uint8_t ledBright = 128;            // 0..255
+
+static void applyLed() {
+  strip.setBrightness(ledOn ? ledBright : 0);
+  strip.fill(ledOn ? ledColor : 0);
+  strip.show();
+}
 
 static void setLed(bool on) {
   ledOn = on;
-  digitalWrite(LED_PIN, on ? HIGH : LOW);
   prefs.putBool("led", on);
-  Serial.printf("[led] %s\n", on ? "ON" : "OFF");
+  applyLed();
+  Serial.printf("[led] %s color=%06lX bright=%u\n", on ? "ON" : "OFF", (unsigned long)ledColor, ledBright);
+}
+
+static void setLedColor(uint32_t rgb, int bright) {
+  ledColor = rgb & 0xFFFFFF;
+  if (bright >= 0) ledBright = (uint8_t)constrain(bright, 0, 255);
+  prefs.putUInt("ledc", ledColor);
+  prefs.putUChar("ledb", ledBright);
+  applyLed();
 }
 
 // ---------------------------------------------------------------- web
@@ -320,6 +340,8 @@ static String statusJson() {
   j += ",\"ip\":\"" + (ethStarted ? ETH.localIP().toString() : String("")) + "\"";
   j += ",\"board\":\"" + String(ethPins ? ethPins->name : "no ethernet") + "\"";
   j += ",\"led\":" + String(ledOn ? "true" : "false");
+  char cbuf[8]; snprintf(cbuf, sizeof(cbuf), "%06lX", (unsigned long)ledColor);
+  j += ",\"ledColor\":\"" + String(cbuf) + "\",\"ledBright\":" + String(ledBright);
   j += ",\"screens\":[";
   for (int i = 0; i < 2; i++) {
     if (i) j += ",";
@@ -387,13 +409,21 @@ static void handleFrameBmp() {
   }
 }
 
-// /led?state=on|off|1|0|toggle  (no state -> toggle)
+// /led?state=on|off|1|0|toggle&color=RRGGBB&bright=0..255  (state omitted -> keep/ toggle if nothing else given)
 static void handleLed() {
+  bool changed = false;
+  if (server.hasArg("color") || server.hasArg("bright")) {
+    uint32_t rgb = ledColor;
+    if (server.hasArg("color")) { String c = server.arg("color"); c.replace("#", ""); rgb = strtoul(c.c_str(), nullptr, 16); }
+    int b = server.hasArg("bright") ? server.arg("bright").toInt() : -1;
+    setLedColor(rgb, b);
+    changed = true;
+  }
   String st = server.arg("state");
   st.toLowerCase();
   if (st == "on" || st == "1" || st == "true") setLed(true);
   else if (st == "off" || st == "0" || st == "false") setLed(false);
-  else setLed(!ledOn);
+  else if (!changed) setLed(!ledOn);
   server.send(200, "application/json; charset=utf-8", statusJson());
 }
 
@@ -417,7 +447,7 @@ static void printHelp() {
   Serial.println("Commands (serial):");
   Serial.println(" 1 - white (current screen)   2 - black   3 - test pattern");
   Serial.println(" t<text>  - render text with TTF on current screen (UTF-8, \\n = new line)");
-  Serial.println(" p - toggle current screen (1/2)    l - LED on/off (GPIO47)    i - network info    h - help");
+  Serial.println(" p - toggle current screen (1/2)    l - strip on/off (GPIO47, WS2812)    i - network info    h - help");
 }
 
 static void handleSerial() {
@@ -460,8 +490,10 @@ void setup() {
     lastBold[i] = prefs.getBool(i == 0 ? "b0" : "b1", false);
   }
 
-  pinMode(LED_PIN, OUTPUT);
-  setLed(true);   // always ON after boot (bench check for the lamp wiring); web button can still switch it
+  strip.begin();
+  ledColor = prefs.getUInt("ledc", 0xFFFFFF);
+  ledBright = prefs.getUChar("ledb", 128);
+  setLed(true);   // always ON after boot (bench check); web button can still switch it
 
   setupFonts();
 
