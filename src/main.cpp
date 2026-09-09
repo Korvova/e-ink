@@ -511,6 +511,9 @@ static void handleClear() {
 
 // Last rendered frame as a 1-bit BMP (what was actually sent to the panel)
 static void handleFrameBmp() {
+  // wait until no job is rendering/pushing so the picture is consistent (max 30 s)
+  unsigned long t0 = millis();
+  while ((displayBusy || uxQueueMessagesWaiting(jobQueue)) && millis() - t0 < 30000) delay(50);
   const int stride = ((BYTES_PER_LINE + 3) / 4) * 4; // 172
   const uint32_t dataSize = (uint32_t)stride * DISP_H;
   const uint32_t fileSize = 62 + dataSize;
@@ -667,7 +670,7 @@ void setup() {
   setupFonts();
 
   jobQueue = xQueueCreate(4, sizeof(Job));
-  xTaskCreatePinnedToCore(displayTask, "epd", 12288, nullptr, 1, nullptr, 0);
+  xTaskCreatePinnedToCore(displayTask, "epd", 12288, nullptr, 3, nullptr, 0);   // above loop/web so HTTP traffic does not delay rendering
 
   setupEthernet();
   setupWeb();
