@@ -113,7 +113,10 @@ static void setupFonts() {
     r->setFontColor((uint16_t)0x0000, (uint16_t)0xFFFF);
     r->setBackgroundFillMethod(BgFillMethod::None);
     r->setLineSpaceRatio(1.15);
+    r->setDebugLevel(OFR_ERROR);
   }
+  // glyphs are rasterised in a shared FreeRTOS task; CJK outlines need a bigger stack than the 20 KB default
+  ofrCjk.setRenderTaskStackSize(40 * 1024);
   FT_Error e1 = ofrRegular.loadFont(ptsans_start, ptsans_end - ptsans_start);
   FT_Error e2 = ofrBold.loadFont(ptsansb_start, ptsansb_end - ptsansb_start);
   FT_Error e3 = ofrCjk.loadFont(notosc_start, notosc_end - notosc_start);

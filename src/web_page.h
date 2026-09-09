@@ -55,8 +55,45 @@ static const char WEB_PAGE[] PROGMEM = R"HTML(<!doctype html>
   <div class="row"><button class="show">Показать на экране 2</button><button class="secondary clear">Очистить</button></div>
   <div class="status"></div>
  </section>
+ <section class="card" id="imgcard" style="grid-column:1/-1">
+  <h2>Картинка на экран</h2>
+  <div class="row">
+   <input type="file" id="imgfile" accept="image/*">
+   <label><input type="checkbox" id="imginv"> инвертировать (белое → чёрное)</label>
+   <label><input type="checkbox" id="imgdith"> дизеринг</label>
+   <label>порог <input type="range" id="imgthr" min="1" max="254" value="128" style="width:110px"></label>
+   <label>поля, px <input type="number" id="imgmargin" min="0" max="200" value="40"></label>
+  </div>
+  <canvas id="imgcanvas" width="1360" height="480" style="width:100%;border:1px solid #bbb;background:#fff;aspect-ratio:1360/480"></canvas>
+  <div class="row"><button id="imgsend1">На экран 1</button><button id="imgsend2">На экран 2</button></div>
+  <div class="status" id="imgstatus">Выбери файл: PNG, JPG, SVG. Прозрачный фон станет белым.</div>
+ </section>
 </main>
 <script>
+// ---- image upload: fit into 1360x480, threshold/dither in the browser, POST 81600 bytes to /image
+const imgc=document.getElementById('imgcanvas'),ictx=imgc.getContext('2d');let imgSrc=null;
+const imgOpts=['imginv','imgdith','imgthr','imgmargin'].map(id=>document.getElementById(id));
+document.getElementById('imgfile').addEventListener('change',e=>{const f=e.target.files[0];if(!f)return;const im=new Image();
+ im.onload=()=>{imgSrc=im;renderImg()};im.src=URL.createObjectURL(f)});
+imgOpts.forEach(el=>el.addEventListener('input',renderImg));
+function renderImg(){if(!imgSrc)return;const W=1360,H=480,m=+imgOpts[3].value,inv=imgOpts[0].checked,dith=imgOpts[1].checked,thr=+imgOpts[2].value;
+ ictx.fillStyle='#fff';ictx.fillRect(0,0,W,H);
+ const sc=Math.min((W-2*m)/imgSrc.width,(H-2*m)/imgSrc.height),w=Math.round(imgSrc.width*sc),h=Math.round(imgSrc.height*sc);
+ const off=document.createElement('canvas');off.width=w;off.height=h;const octx=off.getContext('2d');
+ octx.drawImage(imgSrc,0,0,w,h);const d=octx.getImageData(0,0,w,h),p=d.data;
+ for(let i=0;i<p.length;i+=4){const a=p[i+3]/255;let g=(0.299*p[i]+0.587*p[i+1]+0.114*p[i+2]);if(inv)g=255-g;g=g*a+255*(1-a);p[i]=p[i+1]=p[i+2]=g;p[i+3]=255}
+ octx.putImageData(d,0,0);ictx.drawImage(off,(W-w)/2,(H-h)/2);
+ const fd=ictx.getImageData(0,0,W,H),q=fd.data,g=new Float32Array(W*H);
+ for(let i=0;i<W*H;i++)g[i]=q[i*4];
+ for(let y=0;y<H;y++)for(let x=0;x<W;x++){const i=y*W+x,o=g[i],v=o<thr?0:255;g[i]=v;if(dith){const e=o-v;
+  if(x+1<W)g[i+1]+=e*7/16;if(y+1<H){if(x>0)g[i+W-1]+=e*3/16;g[i+W]+=e*5/16;if(x+1<W)g[i+W+1]+=e*1/16}}}
+ for(let i=0;i<W*H;i++){q[i*4]=q[i*4+1]=q[i*4+2]=g[i]}ictx.putImageData(fd,0,0)}
+async function sendImg(n){if(!imgSrc){document.getElementById('imgstatus').textContent='Сначала выбери файл';return}
+ const W=1360,H=480,q=ictx.getImageData(0,0,W,H).data,bytes=new Uint8Array(W/8*H);
+ for(let y=0;y<H;y++)for(let x=0;x<W;x++)if(q[(y*W+x)*4]<128)bytes[y*(W/8)+(x>>3)]|=0x80>>(x&7);
+ const fdata=new FormData();fdata.append('image',new Blob([bytes]),'frame.bin');const st=document.getElementById('imgstatus');
+ st.textContent='Отправляю…';try{const r=await fetch('/image?screen='+n,{method:'POST',body:fdata});st.textContent=r.status==202?'Принято, экран обновляется ~20 с':'Ошибка '+r.status+': '+await r.text()}catch(e){st.textContent='Нет связи с платой'}}
+document.getElementById('imgsend1').onclick=()=>sendImg(1);document.getElementById('imgsend2').onclick=()=>sendImg(2);
 const cards=[...document.querySelectorAll('.card')];
 function ui(c){return{ta:c.querySelector('textarea'),size:c.querySelector('input[type=number]'),bold:c.querySelector('input[type=checkbox]'),
  prev:c.querySelector('.preview'),st:c.querySelector('.status'),btns:c.querySelectorAll('button'),n:c.dataset.screen}}
