@@ -69,9 +69,27 @@ extern const uint8_t ptsans_start[] asm("_binary_data_ptsans_ttf_start");
 extern const uint8_t ptsans_end[]   asm("_binary_data_ptsans_ttf_end");
 extern const uint8_t ptsansb_start[] asm("_binary_data_ptsansb_ttf_start");
 extern const uint8_t ptsansb_end[]   asm("_binary_data_ptsansb_ttf_end");
+extern const uint8_t notosc_start[] asm("_binary_data_notosc_ttf_start");
+extern const uint8_t notosc_end[]   asm("_binary_data_notosc_ttf_end");
 
 static OpenFontRender ofrRegular;
 static OpenFontRender ofrBold;
+static OpenFontRender ofrCjk;      // Noto Sans SC (medium), Latin+Cyrillic+GB2312 level-1
+
+// true if the UTF-8 string contains CJK characters (>= U+2E80)
+static bool hasCjk(const String& t) {
+  for (size_t i = 0; i < t.length(); i++) {
+    uint8_t c = (uint8_t)t[i];
+    if (c >= 0xE0) {                                   // 3-byte sequence -> U+0800..U+FFFF
+      if (i + 2 < t.length()) {
+        uint32_t cp = ((c & 0x0F) << 12) | (((uint8_t)t[i + 1] & 0x3F) << 6) | ((uint8_t)t[i + 2] & 0x3F);
+        if (cp >= 0x2E80) return true;
+      }
+      i += 2;
+    } else if (c >= 0xC0) i += 1;
+  }
+  return false;
+}
 
 // OpenFontRender blends fg (black) and bg (white) by glyph coverage into RGB565.
 // The panel is 1-bit, so a pixel becomes black when coverage is above 50%.
@@ -88,7 +106,7 @@ static void ofrDrawHLine(int32_t x, int32_t y, int32_t w, uint16_t c) {
 }
 
 static void setupFonts() {
-  for (OpenFontRender* r : { &ofrRegular, &ofrBold }) {
+  for (OpenFontRender* r : { &ofrRegular, &ofrBold, &ofrCjk }) {
     r->setDrawPixel(ofrDrawPixel);
     r->setDrawFastHLine(ofrDrawHLine);
     // draw2screen() uses these, not the fg/bg arguments of drawString(): black on white
@@ -98,8 +116,10 @@ static void setupFonts() {
   }
   FT_Error e1 = ofrRegular.loadFont(ptsans_start, ptsans_end - ptsans_start);
   FT_Error e2 = ofrBold.loadFont(ptsansb_start, ptsansb_end - ptsansb_start);
-  Serial.printf("[font] regular=%d (%u bytes), bold=%d (%u bytes)\n",
-                (int)e1, (unsigned)(ptsans_end - ptsans_start), (int)e2, (unsigned)(ptsansb_end - ptsansb_start));
+  FT_Error e3 = ofrCjk.loadFont(notosc_start, notosc_end - notosc_start);
+  Serial.printf("[font] regular=%d (%u bytes), bold=%d (%u bytes), cjk=%d (%u bytes)\n",
+                (int)e1, (unsigned)(ptsans_end - ptsans_start), (int)e2, (unsigned)(ptsansb_end - ptsansb_start),
+                (int)e3, (unsigned)(notosc_end - notosc_start));
 }
 
 // Split text into lines (\n), trim \r
@@ -118,36 +138,38 @@ static int splitLines(const String& text, String* out, int maxLines) {
 
 // Render text into frameBuf. size==0 -> auto-fit. Returns used font size.
 static int renderText(const String& text, int size, bool bold) {
-  OpenFontRender& r = bold ? ofrBold : ofrRegular;
   const int MARGIN_X = 30, MARGIN_Y = 16;
   String lines[8];
+  OpenFontRender* fonts[8];
   int n = splitLines(text, lines, 8);
   if (n == 0) n = 1;
+  for (int i = 0; i < n; i++) fonts[i] = hasCjk(lines[i]) ? &ofrCjk : (bold ? &ofrBold : &ofrRegular);
 
   if (size <= 0) {
     for (size = 440; size > 16; size -= 8) {
-      r.setFontSize(size);
       int lineH = (int)(size * 1.15);
       if (n * lineH > DISP_H - 2 * MARGIN_Y) continue;
       int maxW = 0;
       for (int i = 0; i < n; i++) {
         if (lines[i].length() == 0) continue;
-        int w = (int)r.getTextWidth("%s", lines[i].c_str());
+        fonts[i]->setFontSize(size);
+        int w = (int)fonts[i]->getTextWidth("%s", lines[i].c_str());
         if (w > maxW) maxW = w;
       }
       if (maxW <= DISP_W - 2 * MARGIN_X) break;
     }
   }
-  r.setFontSize(size);
   int lineH = (int)(size * 1.15);
   int totalH = n * lineH;
   int y0 = (DISP_H - totalH) / 2;
   if (y0 < 0) y0 = 0;
 
   clearFrame();
-  r.setAlignment(Align::TopCenter);
   for (int i = 0; i < n; i++) {
     if (lines[i].length() == 0) continue;
+    OpenFontRender& r = *fonts[i];
+    r.setFontSize(size);
+    r.setAlignment(Align::TopCenter);
     r.setCursor(DISP_W / 2, y0 + i * lineH);
     r.drawString(lines[i].c_str(), DISP_W / 2, y0 + i * lineH, 0x0000, 0xFFFF, Layout::Horizontal);
   }
@@ -155,7 +177,9 @@ static int renderText(const String& text, int size, bool bold) {
 }
 
 // ---------------------------------------------------------------- display job queue
-enum JobKind : uint8_t { JOB_TEXT, JOB_WHITE, JOB_BLACK, JOB_PATTERN };
+enum JobKind : uint8_t { JOB_TEXT, JOB_WHITE, JOB_BLACK, JOB_PATTERN, JOB_IMAGE };
+// Uploaded 1-bit picture (bit=1 -> black) goes straight into frameBuf (upload is refused while a job runs)
+static volatile size_t imageLen = 0;
 struct Job {
   JobKind kind;
   uint8_t screen;   // 0 or 1
@@ -197,6 +221,9 @@ static void displayTask(void*) {
         applyPinSet(job.screen); EPD_Init(); EPD_WhiteScreen_Black(); EPD_DeepSleep(); break;
       case JOB_PATTERN:
         clearFrame(); drawTestPattern(); pushToPanel(job.screen); break;
+      case JOB_IMAGE:
+        Serial.printf("[job] screen %d image\n", job.screen + 1);
+        pushToPanel(job.screen); break;
     }
     Serial.printf("[job] done in %lu ms\n", millis() - t0);
     displayBusy = false;
@@ -437,6 +464,8 @@ static String statusJson() {
   j += ",\"queued\":" + String((int)uxQueueMessagesWaiting(jobQueue));
   j += ",\"ip\":\"" + (ethStarted ? ETH.localIP().toString() : String("")) + "\"";
   j += ",\"board\":\"" + String(ethPins ? ethPins->name : "no ethernet") + "\"";
+  j += ",\"link\":" + String(ethStarted && ETH.linkUp() ? "true" : "false") + ",\"mac\":\"" + (ethStarted ? ETH.macAddress() : String("")) + "\"";
+  j += ",\"heap\":" + String(ESP.getFreeHeap());
   j += ",\"led\":" + String(ledOn ? "true" : "false");
   char cbuf[8]; snprintf(cbuf, sizeof(cbuf), "%06lX", (unsigned long)ledColor);
   j += ",\"ledColor\":\"" + String(cbuf) + "\",\"ledBright\":" + String(ledBright);
@@ -531,8 +560,38 @@ static void handleLed() {
   server.send(200, "application/json; charset=utf-8", statusJson());
 }
 
+static void handleImageUpload() {
+  HTTPUpload& up = server.upload();
+  if (up.status == UPLOAD_FILE_START) {
+    imageLen = 0;
+  } else if (up.status == UPLOAD_FILE_WRITE) {
+    if (displayBusy || uxQueueMessagesWaiting(jobQueue)) return;   // frameBuf in use -> drop, reported below
+    size_t room = sizeof(frameBuf) - imageLen;
+    size_t n = up.currentSize < room ? up.currentSize : room;
+    memcpy(frameBuf + imageLen, up.buf, n);
+    imageLen += n;
+  } else if (up.status == UPLOAD_FILE_END) {
+    Serial.printf("[image] received %u bytes\n", (unsigned)imageLen);
+  }
+}
+
+static void handleImageDone() {
+  int screen = server.arg("screen").toInt();
+  if (screen < 1 || screen > 2) { server.send(400, "text/plain", "screen must be 1 or 2"); return; }
+  if (imageLen != sizeof(frameBuf)) {
+    server.send(imageLen == 0 ? 503 : 400, "text/plain",
+                "expected " + String(sizeof(frameBuf)) + " bytes (1360x480, 1 bit, bit=1 black), got " + String((unsigned)imageLen) +
+                (imageLen == 0 ? " (display busy, retry later)" : ""));
+    return;
+  }
+  lastText[screen - 1] = "[картинка]";
+  bool ok = submitSimple(JOB_IMAGE, screen - 1);
+  server.send(ok ? 202 : 503, "application/json; charset=utf-8", statusJson());
+}
+
 static void setupWeb() {
   server.on("/frame.bmp", HTTP_GET, handleFrameBmp);
+  server.on("/image", HTTP_POST, handleImageDone, handleImageUpload);
   server.on("/led", HTTP_GET, handleLed);
   server.on("/led", HTTP_POST, handleLed);
   server.on("/", HTTP_GET, handleRoot);

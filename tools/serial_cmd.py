@@ -8,6 +8,7 @@ Usage:
 """
 import sys, time, serial
 
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")   # Windows console may be cp1251
 port = sys.argv[1]
 cmd = sys.argv[2] if len(sys.argv) > 2 else 'i'
 arg = sys.argv[3] if len(sys.argv) > 3 else ''

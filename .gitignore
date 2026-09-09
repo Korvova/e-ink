@@ -16,3 +16,8 @@ Thumbs.db
 # Temp files
 *.tmp
 *.bak
+
+# scratch
+_fonts/
+_frame.bmp
+_frame.png
