@@ -10,6 +10,8 @@ White-on-transparent logos are detected and inverted automatically (override wit
 import argparse, io, sys, urllib.request, uuid
 from PIL import Image
 
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")   # status JSON may contain non-cp1251 text
+
 W, H = 1360, 480
 
 ap = argparse.ArgumentParser()

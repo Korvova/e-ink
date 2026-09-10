@@ -180,7 +180,8 @@ static int renderText(const String& text, int size, bool bold) {
 }
 
 // ---------------------------------------------------------------- display job queue
-enum JobKind : uint8_t { JOB_TEXT, JOB_WHITE, JOB_BLACK, JOB_PATTERN, JOB_IMAGE };
+enum JobKind : uint8_t { JOB_TEXT, JOB_WHITE, JOB_BLACK, JOB_PATTERN, JOB_IMAGE, JOB_DIAG };
+static String diagResult[2] = {"", ""};
 // Uploaded 1-bit picture (bit=1 -> black) goes straight into frameBuf (upload is refused while a job runs)
 static volatile size_t imageLen = 0;
 struct Job {
@@ -205,6 +206,40 @@ static void pushToPanel(uint8_t screen) {
   EPD_DeepSleep();
 }
 
+// Panel health check: reset + power on + white refresh while sampling BUSY.
+// A live panel pulls BUSY low during power-on and for several seconds during refresh;
+// a broken cable leaves BUSY at 1 (internal pull-up) the whole time.
+static void runDiag(uint8_t screen) {
+  applyPinSet(screen);
+  String r = "screen " + String(screen + 1) + ": ";
+  int busyIdle = digitalRead(EPD_W21_BUSY);
+  // reset pulse and watch BUSY for 300 ms
+  digitalWrite(EPD_W21_RST, LOW); delay(10); digitalWrite(EPD_W21_RST, HIGH);
+  int lowAfterReset = 0;
+  for (int i = 0; i < 30; i++) { if (digitalRead(EPD_W21_BUSY) == 0) lowAfterReset++; delay(10); }
+  EPD_Init();                                   // includes power on (0x04)
+  // white frame to both chips, then refresh
+  EPD_W21_WriteCMD1(0x10); for (unsigned i = 0; i < EPD_ARRAY; i++) EPD_W21_WriteDATA1(0xFF);
+  EPD_W21_WriteCMD1(0x13); for (unsigned i = 0; i < EPD_ARRAY; i++) EPD_W21_WriteDATA1(0xFF);
+  EPD_W21_WriteCMD2(0x10); for (unsigned i = 0; i < EPD_ARRAY; i++) EPD_W21_WriteDATA2(0xFF);
+  EPD_W21_WriteCMD2(0x13); for (unsigned i = 0; i < EPD_ARRAY; i++) EPD_W21_WriteDATA2(0xFF);
+  EPD_W21_WriteCMD(0x12);
+  unsigned long t0 = millis(), firstLow = 0, lastLow = 0; int lowSamples = 0;
+  while (millis() - t0 < 20000) {
+    if (digitalRead(EPD_W21_BUSY) == 0) {
+      if (!firstLow) firstLow = millis() - t0;
+      lastLow = millis() - t0; lowSamples++;
+    }
+    delay(10);
+  }
+  EPD_DeepSleep();
+  r += "busy_idle=" + String(busyIdle) + " low_after_reset=" + String(lowAfterReset * 10) + "ms ";
+  if (firstLow || lowSamples) r += "refresh: BUSY low from " + String(firstLow) + " ms to " + String(lastLow) + " ms (" + String(lowSamples * 10) + " ms low) -> PANEL OK";
+  else r += "refresh: BUSY never went low in 20 s -> panel NOT responding (cable/BUSY line/power)";
+  diagResult[screen] = r;
+  Serial.println("[diag] " + r);
+}
+
 static void displayTask(void*) {
   Job job;
   for (;;) {
@@ -224,6 +259,8 @@ static void displayTask(void*) {
         applyPinSet(job.screen); EPD_Init(); EPD_WhiteScreen_Black(); EPD_DeepSleep(); break;
       case JOB_PATTERN:
         clearFrame(); drawTestPattern(); pushToPanel(job.screen); break;
+      case JOB_DIAG:
+        runDiag(job.screen); break;
       case JOB_IMAGE:
         Serial.printf("[job] screen %d image\n", job.screen + 1);
         pushToPanel(job.screen); break;
@@ -469,6 +506,7 @@ static String statusJson() {
   j += ",\"board\":\"" + String(ethPins ? ethPins->name : "no ethernet") + "\"";
   j += ",\"link\":" + String(ethStarted && ETH.linkUp() ? "true" : "false") + ",\"mac\":\"" + (ethStarted ? ETH.macAddress() : String("")) + "\"";
   j += ",\"heap\":" + String(ESP.getFreeHeap());
+  j += ",\"diag\":[\"" + jsonEscape(diagResult[0]) + "\",\"" + jsonEscape(diagResult[1]) + "\"]";
   j += ",\"led\":" + String(ledOn ? "true" : "false");
   char cbuf[8]; snprintf(cbuf, sizeof(cbuf), "%06lX", (unsigned long)ledColor);
   j += ",\"ledColor\":\"" + String(cbuf) + "\",\"ledBright\":" + String(ledBright);
@@ -595,8 +633,19 @@ static void handleImageDone() {
   server.send(ok ? 202 : 503, "application/json; charset=utf-8", statusJson());
 }
 
+// /diag?screen=1|2 -> queue a BUSY-line panel check; result appears in /status "diag"
+static void handleDiag() {
+  int screen = server.arg("screen").toInt();
+  if (screen < 1 || screen > 2) { server.send(400, "text/plain", "screen must be 1 or 2"); return; }
+  diagResult[screen - 1] = "running...";
+  bool ok = submitSimple(JOB_DIAG, screen - 1);
+  server.send(ok ? 202 : 503, "application/json; charset=utf-8", statusJson());
+}
+
 static void setupWeb() {
   server.on("/frame.bmp", HTTP_GET, handleFrameBmp);
+  server.on("/diag", HTTP_GET, handleDiag);
+  server.on("/diag", HTTP_POST, handleDiag);
   server.on("/image", HTTP_POST, handleImageDone, handleImageUpload);
   server.on("/led", HTTP_GET, handleLed);
   server.on("/led", HTTP_POST, handleLed);
@@ -616,7 +665,7 @@ static void printHelp() {
   Serial.println("Commands (serial):");
   Serial.println(" 1 - white (current screen)   2 - black   3 - test pattern");
   Serial.println(" t<text>  - render text with TTF on current screen (UTF-8, \\n = new line)");
-  Serial.println(" p - toggle current screen (1/2)    l - strip on/off (GPIO47, WS2812)    i - network info    h - help");
+  Serial.println(" p - toggle current screen (1/2)    d - panel diag (BUSY)    l - strip on/off    i - info    h - help");
 }
 
 static void handleSerial() {
@@ -635,6 +684,8 @@ static void handleSerial() {
   } else if (c == 'p') {
     curPinSet = curPinSet == 0 ? 1 : 0;
     Serial.printf("[cmd] current screen -> %d\n", curPinSet + 1);
+  } else if (c == 'd') {
+    submitSimple(JOB_DIAG, scr);
   } else if (c == 'l') {
     setLed(!ledOn);
   } else if (c == 'i') {
