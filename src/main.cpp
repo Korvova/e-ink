@@ -588,6 +588,7 @@ static void handleLed() {
     uint32_t rgb = ledColor;
     if (server.hasArg("color")) { String c = server.arg("color"); c.replace("#", ""); rgb = strtoul(c.c_str(), nullptr, 16); }
     int b = server.hasArg("bright") ? server.arg("bright").toInt() : -1;
+    if (server.hasArg("color") && ledEffect == FX_RAINBOW && !server.hasArg("effect")) ledEffect = FX_SOLID;  // rainbow ignores colour
     setLedColor(rgb, b);
     changed = true;
   }

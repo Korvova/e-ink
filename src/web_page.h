@@ -94,7 +94,7 @@ async function sendImg(n){if(!imgSrc){document.getElementById('imgstatus').textC
  const fdata=new FormData();fdata.append('image',new Blob([bytes]),'frame.bin');const st=document.getElementById('imgstatus');
  st.textContent='Отправляю…';try{const r=await fetch('/image?screen='+n,{method:'POST',body:fdata});st.textContent=r.status==202?'Принято, экран обновляется ~20 с':'Ошибка '+r.status+': '+await r.text()}catch(e){st.textContent='Нет связи с платой'}}
 document.getElementById('imgsend1').onclick=()=>sendImg(1);document.getElementById('imgsend2').onclick=()=>sendImg(2);
-const cards=[...document.querySelectorAll('.card')];
+const cards=[...document.querySelectorAll('.card[data-screen]')];
 function ui(c){return{ta:c.querySelector('textarea'),size:c.querySelector('input[type=number]'),bold:c.querySelector('input[type=checkbox]'),
  prev:c.querySelector('.preview'),st:c.querySelector('.status'),btns:c.querySelectorAll('button'),n:c.dataset.screen}}
 function preview(c){const u=ui(c);const w=u.prev.clientWidth;const scale=w/1360;
@@ -111,7 +111,8 @@ const ledBtn=document.getElementById('led');
 function showLed(on){ledBtn.textContent='💡 Лампа: '+(on?'ВКЛ':'выкл');ledBtn.classList.toggle('on',on)}
 ledBtn.onclick=async()=>{try{const s=await(await fetch('/led?state=toggle',{method:'POST'})).json();showLed(s.led)}catch(e){}};
 const ledC=document.getElementById('ledc'),ledB=document.getElementById('ledb');let ledInit=false;
-async function sendLedColor(){try{await fetch('/led?color='+ledC.value.slice(1)+'&bright='+ledB.value,{method:'POST'})}catch(e){}}
+async function sendLedColor(){const fx=document.getElementById('ledfx');if(fx.value=='rainbow')fx.value='solid';
+ try{await fetch('/led?state=on&color='+ledC.value.slice(1)+'&bright='+ledB.value+'&effect='+fx.value,{method:'POST'})}catch(e){}}
 ledC.addEventListener('change',sendLedColor);ledB.addEventListener('change',sendLedColor);
 const ledFx=document.getElementById('ledfx'),ledSp=document.getElementById('ledsp');
 async function sendLedFx(){try{await fetch('/led?state=on&effect='+ledFx.value+'&speed='+ledSp.value,{method:'POST'})}catch(e){}}
