@@ -234,7 +234,8 @@ static void runDiag(uint8_t screen) {
   }
   EPD_DeepSleep();
   r += "busy_idle=" + String(busyIdle) + " low_after_reset=" + String(lowAfterReset * 10) + "ms ";
-  if (firstLow || lowSamples) r += "refresh: BUSY low from " + String(firstLow) + " ms to " + String(lastLow) + " ms (" + String(lowSamples * 10) + " ms low) -> PANEL OK";
+  if (lastLow >= 19900) r += "refresh: BUSY low from " + String(firstLow) + " ms and STILL LOW after 20 s -> panel STUCK in refresh (damaged flex / HV supply)";
+  else if (firstLow || lowSamples) r += "refresh: BUSY low from " + String(firstLow) + " ms to " + String(lastLow) + " ms (" + String(lowSamples * 10) + " ms low) -> PANEL OK";
   else r += "refresh: BUSY never went low in 20 s -> panel NOT responding (cable/BUSY line/power)";
   diagResult[screen] = r;
   Serial.println("[diag] " + r);
@@ -265,7 +266,7 @@ static void displayTask(void*) {
         Serial.printf("[job] screen %d image\n", job.screen + 1);
         pushToPanel(job.screen); break;
     }
-    Serial.printf("[job] done in %lu ms\n", millis() - t0);
+    Serial.printf("[job] done in %lu ms, free heap %u\n", millis() - t0, (unsigned)ESP.getFreeHeap());
     displayBusy = false;
   }
 }
